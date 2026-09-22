@@ -744,3 +744,48 @@ The flag-off session's settled screen, with the preference `on` on disk, drew Cl
 
 ✻ Sautéed for 8s · done 11:07 AM
 ```
+
+## 2026-09-22 OMP 18.2.8 Calm feasibility and implementation
+
+OMP is a Pi fork, but its extension and transcript APIs differ from the Pi package.
+The installed binary reported `omp/18.2.8`.
+OMP auto-discovers only top-level `.omp/extensions/*.ts` files from the working directory.
+It injects coding-agent exports through `pi.pi`.
+The injected exports include `InteractiveMode`, `AssistantMessageComponent`, and `UserMessageComponent`.
+The standalone binary does not resolve `@oh-my-pi/pi-tui` from an extension file.
+A first probe that imported that package failed before command registration.
+The successful adapter accepts OMP's injected constructors instead and imports no OMP runtime package.
+
+OMP exposes `setWorkingMessage`, but not Pi's `setWorkingVisible` or `setHiddenThinkingLabel`.
+`InteractiveMode.ensureLoadingAnimation` creates the ordinary loader and keeps it in `loadingAnimation`.
+The working adapter probes that method and wraps only the loader instance carrying Calm's private sentinel.
+Retry and compaction loaders carry different messages and keep their stock rendering.
+The adapter uses OMP's managed interval API and keeps the boat active when `agent_end.willContinue` is true.
+A final `agent_end` clears the timer and restores the stock working message.
+
+OMP's transcript container owns one `setToolActivityVisible` control for built-in and extension tools.
+Calm uses that control instead of replacing tool definitions.
+This avoids Pi's same-name tool registration collision.
+The assistant adapter gives OMP a shallow presentation copy with hidden thinking and eligible working notes removed.
+It retains the original message for later redraw.
+The user adapter renders only canonically classified Firstmate operational rows at zero height.
+The toggle asks OMP to rebuild its transcript from stored messages and clear the old terminal rendering.
+It does not rewrite session messages or intercept input.
+
+The implementation probes each patched method rather than using a numeric version gate.
+An unavailable adapter logs a diagnostic and does not prevent `/calm` or unrelated extensions from loading.
+The preference uses the same atomic `config/calm` contract as Pi.
+An installed OMP RPC smoke loaded the extension explicitly, registered `/calm`, and toggled `on` and `off` without invoking the model.
+Each command wrote the expected preference value.
+`tests/fm-calm-omp-extension.test.sh` drives the injected classes and verifies filtering, restoration, loader replacement, managed timer lifecycle, repaint, and persistence.
+
+| Requirement | Result on OMP 18.2.8 |
+| --- | --- |
+| Auto-load from the trusted project | Met through `.omp/extensions/fm-calm.ts`. |
+| Persist the toggle across starts | Met through the shared atomic `config/calm` file. |
+| Keep working activity visible | Met with the shared two-row ANSI boat in OMP's working-loader slot. |
+| Emit no Calm status row | Met; successful toggles add no notice or transcript row. |
+| Redraw controlled existing rows | Met through OMP's native transcript rebuild with terminal-history clearing. |
+| Remove supported hidden rows without gaps | Met through filtered assistant layout, zero-height operational rows, and native tool visibility. |
+| Restore ordinary rendering when off | Met, while preserving OMP's independent `display.hideToolActivity` setting. |
+| Preserve execution and stored data | Met because only component rendering and container visibility change. |

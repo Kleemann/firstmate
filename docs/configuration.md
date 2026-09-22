@@ -29,13 +29,20 @@ Ordinary dead-direct-report recovery is owned by `stuck-crewmate-recovery`, whil
 
 ## Calm preference (config/calm)
 
-The Pi Calm extension and the Claude Code Calm mod share the captain's home-local presentation choice in gitignored `config/calm` under the effective Firstmate home, so one `/calm` choice applies on either harness.
-Both resolve that home from `FM_HOME`, then `FM_ROOT_OVERRIDE`, then the tracked code root derived from their own path under it, or use `FM_CONFIG_OVERRIDE` as the config directory outright when that test and specialized-setup override is present.
-The values they write are `on` and `off`, each followed by one newline; an absent, unreadable, or unrecognized value defaults to off.
-`max` is the legacy value written by a removed third presentation level whose behavior is now ordinary Calm, and it is still read as `on`, so a home upgraded from it keeps Calm on rather than dropping to off.
-Each `/calm` command persists the new choice before changing live presentation, so a failed write leaves the current choice unchanged rather than claiming persistence; Pi replaces the file atomically, while the Claude Code mod writes it through the plugin API's plain file write.
-The Pi extension reloads this preference on every Pi `session_start`, including startup, new, resume, fork, and reload reasons.
-The Claude Code mod likewise reloads it on every `session.start`, including same-process session replacement, and also loads it lazily before any row that can draw ahead of that event, including during `claude --continue` restoration.
+The Pi and OMP Calm extensions and the Claude Code Calm mod share the captain's home-local choice in gitignored `config/calm`.
+One `/calm` choice therefore applies on all three harnesses.
+They resolve the home from `FM_HOME`, then `FM_ROOT_OVERRIDE`, then the tracked code root derived from their own path.
+`FM_CONFIG_OVERRIDE` selects the config directory directly for tests and specialized setups.
+The values are `on` and `off`, each followed by one newline.
+An absent, unreadable, or unrecognized value defaults to off.
+`max` is a legacy third-level value and remains equivalent to `on`.
+Each `/calm` command persists the new choice before it changes live presentation.
+A failed write leaves the current choice unchanged rather than claiming persistence.
+The Pi and OMP extensions replace the file atomically.
+The Claude Code mod writes it through the plugin API's plain file write.
+The Pi and OMP extensions reload the preference on every `session_start`.
+The Claude Code mod reloads it on every `session.start`.
+It also loads the preference before any row that can draw during `claude --continue` restoration.
 This preference is local to each Firstmate home and is not part of secondmate inherited configuration.
 
 ## Pi supervision branch
