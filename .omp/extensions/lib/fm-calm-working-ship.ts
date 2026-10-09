@@ -1,6 +1,6 @@
 // OMP adapter for Firstmate's Calm working ship.
 //
-// Verified against OMP 18.2.8. OMP exposes setWorkingMessage(), not Pi's
+// Verified against OMP 18.2.8 and 18.7.0. OMP exposes setWorkingMessage(), not Pi's
 // setWorkingVisible(). The extension gives the stock loader a private sentinel, then
 // this API-probed adapter replaces only that loader row with the shared ANSI ship.
 // Compaction and retry loaders keep their ordinary messages and rendering.

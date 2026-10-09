@@ -158,10 +158,10 @@ How Calm handles that shared slot depends on whether Calm was already on when th
 - [`calm-mode-feasibility.md`](calm-mode-feasibility.md) owns the version-scoped renderer taxonomy, built-in override constraints, and empirical evidence.
 - [`configuration.md`](configuration.md#calm-preference-configcalm) owns the persisted preference file and resolution rules.
 - `.pi/extensions/lib/fm-calm-visibility.ts` owns the visibility policy.
-- `.claude/mods/firstmate-calm/lib/fm-calm-preservation.ts` owns the shared substantive mid-turn text rule, which Pi imports through its tracked symlink.
+- `.claude/mods/firstmate-calm/lib/fm-calm-preservation.ts` owns the shared substantive mid-turn text rule, which Pi imports through its tracked symlink and OMP imports directly.
 - `.pi/extensions/lib/fm-calm-operational-user-layout.ts` owns the zero-height operational-user row adapter.
 - `.pi/extensions/lib/fm-calm-pending-operational-layout.ts` owns the queued-row adapter and its session capability check.
-- `.pi/extensions/lib/fm-calm-working-ship.ts` owns Pi's animated working presentation over the sprite geometry both harnesses share in `.claude/mods/firstmate-calm/lib/fm-calm-working-ship-sprite.ts`.
+- `.pi/extensions/lib/fm-calm-working-ship.ts` owns the standard-ANSI animated working presentation that Pi and OMP draw over the sprite geometry shared with Claude Code in `.claude/mods/firstmate-calm/lib/fm-calm-working-ship-sprite.ts`.
 
 ### Pi regression entry points
 
@@ -192,11 +192,16 @@ It stops and restores OMP's stock row when the logical run ends.
 Retry and compaction loaders remain unchanged.
 When Calm is off, OMP also keeps the user's existing `display.hideToolActivity` choice.
 
-OMP 18.2.8 injects `InteractiveMode`, `AssistantMessageComponent`, and `UserMessageComponent` through `pi.pi`.
+OMP 18.2.8 and 18.7.0 inject `InteractiveMode`, `AssistantMessageComponent`, and `UserMessageComponent` through `pi.pi`.
 The standalone binary does not expose its package imports to extension module resolution.
 The adapter therefore accepts those injected classes and probes each method that it patches.
 An incompatible transcript or working-loader seam logs a diagnostic and leaves unrelated OMP behavior available.
 Calm has no numeric OMP version gate.
+[`calm-mode-feasibility.md`](calm-mode-feasibility.md) owns the version-scoped OMP evidence.
+
+`.omp/extensions/fm-calm.ts` owns OMP's `/calm` command, preference loading, and run lifecycle.
+`.omp/extensions/lib/fm-calm-transcript-layout.ts` applies the shared preservation rule and the shared operational-input check from `.pi/extensions/lib/fm-operational-input.ts` to OMP's transcript.
+`.omp/extensions/lib/fm-calm-working-ship.ts` draws Pi's standard-ANSI boat from `.pi/extensions/lib/fm-calm-working-ship.ts` in OMP's working loader.
 
 Regression entry point:
 

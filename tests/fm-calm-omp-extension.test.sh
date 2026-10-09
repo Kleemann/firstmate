@@ -77,10 +77,20 @@ class TranscriptContainer {
 
 }
 
+// OMP 18.7.0 renders an assistant message through segment copies that drop tool calls,
+// force stopReason "stop", and share the original content block objects.
+function beforeToolsSegment(message) {
+  const index = message.content.findIndex(block => block.type === "toolCall");
+  if (index === -1) return message;
+  return { ...message, content: message.content.slice(0, index), stopReason: "stop" };
+}
+
 class InteractiveMode {
   chatContainer = new TranscriptContainer();
   loadingAnimation = undefined;
   streamingComponent = undefined;
+  streamingMessage = undefined;
+  segmentsAssistantMessages = false;
   hideToolActivity = false;
   renders = 0;
   initialRenderOptions = [];
@@ -93,7 +103,9 @@ class InteractiveMode {
   addMessageToChat(message) {
     if (message.role === "assistant") {
       const component = new AssistantMessageComponent();
-      component.updateContent(message);
+      component.updateContent(
+        this.segmentsAssistantMessages ? beforeToolsSegment(message) : message,
+      );
       this.chatContainer.addChild(component);
       return [component];
     }
@@ -122,15 +134,10 @@ class InteractiveMode {
 const handlers = new Map();
 const commands = new Map();
 const extension = await import(`${pathToFileURL(process.env.EXT).href}?test=${Date.now()}`);
+// OMP 18.7.0's injected settings object has no generic get(); Calm must not need one.
 extension.default({
   pi: {
-    settings: {
-      get(path) {
-        if (path === "hideThinkingBlock") return false;
-        if (path === "display.hideToolActivity") return false;
-        return undefined;
-      },
-    },
+    settings: {},
     InteractiveMode,
     AssistantMessageComponent,
     UserMessageComponent,
@@ -215,6 +222,16 @@ await mode.addMessageToChat({
 const operationalComponent = mode.chatContainer.children.at(-1);
 assert(operationalComponent.render(80).length === 0, "Calm exposed operational input");
 
+await mode.addMessageToChat({
+  role: "user",
+  content: [{ type: "text", text: "Ordinary captain input stays visible." }],
+});
+const ordinaryComponent = mode.chatContainer.children.at(-1);
+assert(
+  ordinaryComponent.render(80)[0] === "Ordinary captain input stays visible.",
+  "Calm hid ordinary user input",
+);
+
 await handlers.get("agent_start")({}, context);
 assert(typeof timerCallback === "function", "Calm did not start the managed ship timer");
 const shipFrame = mode.loadingAnimation.render(40);
@@ -239,6 +256,68 @@ assert(
   "/calm did not rebuild native scrollback",
 );
 assert(notifications.length === 0, "successful Calm operations emitted an error notification");
+
+mode.hideToolActivity = true;
+await mode.addMessageToChat(finalAnswer);
+assert(
+  mode.chatContainer.toolActivityVisible === false,
+  "Calm off overrode OMP's own hidden tool-activity choice",
+);
+mode.hideToolActivity = false;
+await commands.get("calm").handler("", context);
+assert(readFileSync(`${process.env.FM_HOME}/config/calm`, "utf8") === "on\n", "/calm did not persist on");
+assert(mode.chatContainer.toolActivityVisible === false, "/calm on did not hide tool activity again");
+assert(mode.hideToolActivity === false, "/calm changed OMP's own tool-activity choice");
+await commands.get("calm").handler("", context);
+assert(mode.chatContainer.toolActivityVisible === true, "second /calm off did not restore tool activity");
+
+await commands.get("calm").handler("", context);
+const segmentedMode = new InteractiveMode();
+segmentedMode.segmentsAssistantMessages = true;
+await segmentedMode.addMessageToChat(midTurn);
+const segmentedMidTurn = segmentedMode.chatContainer.children.at(-1);
+assert(
+  segmentedMidTurn.message.content.length === 0,
+  "Calm kept a short working note from an OMP 18.7.0 tool-call segment",
+);
+await segmentedMode.addMessageToChat(finalAnswer);
+assert(
+  segmentedMode.chatContainer.children.at(-1).message.content[0].text ===
+    "The final answer remains visible.",
+  "Calm hid the final answer from an OMP 18.7.0 segment",
+);
+
+const streamed = new AssistantMessageComponent();
+segmentedMode.chatContainer.addChild(streamed);
+segmentedMode.streamingComponent = streamed;
+segmentedMode.streamingMessage = {
+  role: "assistant",
+  content: [{ type: "text", text: "On it" }],
+};
+streamed.updateContent(beforeToolsSegment(segmentedMode.streamingMessage), { transient: true });
+assert(streamed.message.content[0]?.text === "On it", "Calm hid a note before its step called a tool");
+segmentedMode.streamingMessage = {
+  ...segmentedMode.streamingMessage,
+  stopReason: "toolUse",
+  content: [...segmentedMode.streamingMessage.content, { type: "toolCall", id: "tool-2" }],
+};
+streamed.updateContent(beforeToolsSegment(segmentedMode.streamingMessage));
+assert(
+  streamed.message.content.length === 0,
+  "Calm kept a settled short note from a live OMP 18.7.0 tool-call segment",
+);
+segmentedMode.streamingComponent = new AssistantMessageComponent();
+segmentedMode.streamingMessage = finalAnswer;
+
+await commands.get("calm").handler("", context);
+assert(streamed.message.content[0]?.text === "On it", "/calm off did not restore a live segment note");
+assert(
+  segmentedMidTurn.message.content.length === 2,
+  "/calm off did not restore a rebuilt segment's thinking and note",
+);
+await commands.get("calm").handler("", context);
+assert(streamed.message.content.length === 0, "/calm on did not re-hide a settled live segment note");
+assert(segmentedMidTurn.message.content.length === 0, "/calm on did not re-hide a rebuilt segment note");
 
 const incompatibleMode = new InteractiveMode();
 incompatibleMode.loadingAnimation = {
@@ -266,4 +345,4 @@ status=$?
 expect_code 0 "$status" "OMP Calm extension behavior failed: $out"
 assert_contains "$out" "OMP Calm extension behavior passed" "OMP Calm behavior proof was missing"
 assert_contains "$out" "working loader is incompatible" "missing incompatible-loader diagnostic"
-pass "OMP Calm: filtering, tools, working ship, lifecycle, repaint, and persistence"
+pass "OMP Calm: filtering, OMP 18.7.0 segments, tools, host tool choice, working ship, lifecycle, repaint, and persistence"

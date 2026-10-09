@@ -844,6 +844,51 @@ Each command wrote the expected preference value.
 | Restore ordinary rendering when off | Met, while preserving OMP's independent `display.hideToolActivity` setting. |
 | Preserve execution and stored data | Met because only component rendering and container visibility change. |
 
+## 2026-10-09 OMP 18.7.0 Calm compatibility
+
+The installed binary reported `omp/18.7.0`.
+OMP 18.7.0 removed the generic `get(path)` method from the injected `pi.pi.settings` object.
+Its settings are now read through typed setting definitions that OMP does not export to extensions.
+The 18.2.8 adapter read `display.hideToolActivity` through `settings.get`, so its first auto-discovered launch stopped at startup:
+
+```text
+TypeError: settings.get is not a function. (In 'settings.get("display.hideToolActivity")', 'settings.get' is undefined)
+    at hidesTools (.../.omp/extensions/fm-calm.ts:91:44)
+    at syncMode (.../.omp/extensions/lib/fm-calm-transcript-layout.ts:155:60)
+```
+
+`InteractiveMode.hideToolActivity` holds OMP's own tool-activity choice.
+OMP sets it from `display.hideToolActivity` at startup and on settings changes, and its tool-visibility toggle flips it.
+Calm combines that field with its own preference, so it needs no settings API.
+
+OMP 18.7.0 also renders each assistant message through segment copies.
+Each segment drops the tool calls, forces `stopReason` to `stop`, and shares the original content block objects.
+The 18.2.8 adapter therefore read every segment as a final reply and kept short mid-turn notes.
+Calm now treats a segment as mid-turn when its blocks came from a tool-calling message passed to `addMessageToChat`.
+It also does so when the segment is the live streaming component of the mode's current tool-calling `streamingMessage`.
+
+The TUI checks below ran the installed OMP in a disposable Firstmate home cloned from the change, on a private tmux socket, with `--session-dir` inside that home.
+They did not touch any live Firstmate home or the local `~/.omp/agent/config.yml`.
+That local config sets `display.hideToolActivity: true`, so the visible-tool checks added a per-run `--config` overlay that sets it to `false`.
+
+| Check | Result on OMP 18.7.0 |
+| --- | --- |
+| Startup with Calm off and `display.hideToolActivity: true` | Started, loaded all three `.omp/extensions` files, and listed `/calm`; tool rows stayed hidden by OMP's own choice before and after `/calm` on and off. |
+| `/calm` on and off with tool activity visible | Tool rows, collapsed thinking, and a settled short `On it` note disappeared and returned; `config/calm` read `on`, then `off`. |
+| Restart with Calm on | The restored transcript showed user input, a newline-ended note, and final replies, and hid tool rows, thinking, and the short note. |
+| Live run with Calm on | The two-row boat replaced the working row, the settled short note was hidden, and the final reply stayed visible. |
+| Watcher wake | The encoded operational user row was hidden with Calm on, restored with Calm off, and hidden again with Calm on. |
+| Saved session | It kept every tool call and result, the thinking, the short notes, and both operational user messages. |
+| OMP log | It recorded no Calm diagnostic and no error. |
+
+```text
+$ omp --version
+omp/18.7.0
+
+$ bash tests/fm-calm-omp-extension.test.sh
+ok - OMP Calm: filtering, OMP 18.7.0 segments, tools, host tool choice, working ship, lifecycle, repaint, and persistence
+```
+
 ## 2026-09-25 Claude Code 2.1.280 verification and the record-backed operational doorbell
 
 Claude Code 2.1.280 removes invisible characters, U+2063 included, from every submitted prompt, whether typed, pasted, or passed as the launch prompt.

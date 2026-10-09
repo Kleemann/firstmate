@@ -1,11 +1,11 @@
 // OMP transcript adapter for Firstmate's Calm presentation.
 //
-// Verified against OMP 18.2.8. OMP injects its coding-agent exports through pi.pi,
-// so this adapter accepts the exported constructors instead of importing packages that
-// the standalone binary does not expose to extension module resolution. Each patched
+// Verified against OMP 18.2.8 and 18.7.0. OMP injects its coding-agent exports through
+// pi.pi, so this adapter accepts the exported constructors instead of importing packages
+// that the standalone binary does not expose to extension module resolution. Each patched
 // method is probed before use; incompatible OMP updates disable only this adapter.
 import { calmTextIsSubstantive } from "../../../.claude/mods/firstmate-calm/lib/fm-calm-preservation.ts";
-import { classifyFirstmateCurrentOperationalText } from "../../../.pi/extensions/lib/fm-operational-input.ts";
+import { isFirstmateOperationalPresentationText } from "../../../.pi/extensions/lib/fm-operational-input.ts";
 
 type AssistantContent =
   | { type: "text"; text: string; [key: string]: unknown }
@@ -52,6 +52,7 @@ type InteractiveMode = {
   setWorkingMessage(message?: string): void;
   chatContainer: TranscriptContainer;
   streamingComponent?: AssistantMessageComponent;
+  streamingMessage?: ChatMessage;
   hideToolActivity: boolean;
   ui: OmpUi;
 };
@@ -81,6 +82,7 @@ type CalmTranscriptPatch = {
   modes: Set<InteractiveMode>;
   originalMessages: WeakMap<object, AssistantMessage>;
   presentationCopies: WeakSet<object>;
+  midTurnBlocks: WeakSet<object>;
   operationalRows: WeakSet<object>;
   patchedContainers: WeakSet<object>;
   invalidModes: WeakSet<object>;
@@ -103,19 +105,46 @@ function textOnlyContent(message: ChatMessage): string | undefined {
 function isOperationalInput(message: ChatMessage): boolean {
   if (message.role !== "user") return false;
   const text = textOnlyContent(message);
-  return text !== undefined && classifyFirstmateCurrentOperationalText(text) !== undefined;
+  return text !== undefined && isFirstmateOperationalPresentationText(text);
 }
 
-function isMidTurnAssistantMessage(message: AssistantMessage): boolean {
+function isMidTurnAssistantMessage(message: ChatMessage): message is AssistantMessage {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return false;
   if (message.stopReason === "toolUse") return true;
-  return message.content.some(content => content.type === "toolCall");
+  return message.content.some(content => content?.type === "toolCall");
+}
+
+function rememberMidTurnBlocks(message: ChatMessage, patch: CalmTranscriptPatch): void {
+  if (!isMidTurnAssistantMessage(message)) return;
+  for (const block of message.content) {
+    if (block && typeof block === "object") patch.midTurnBlocks.add(block);
+  }
+}
+
+// OMP 18.7.0 renders each assistant message as segment copies that drop the tool calls
+// and force stopReason "stop", while sharing the original content block objects. A
+// segment therefore belongs to a tool-calling step when its blocks were seen in one,
+// or when it is the live streaming component of the mode's current tool-calling message.
+function belongsToMidTurnStep(
+  component: object,
+  message: AssistantMessage,
+  patch: CalmTranscriptPatch,
+): boolean {
+  if (isMidTurnAssistantMessage(message)) return true;
+  for (const mode of patch.modes) {
+    if (mode.streamingComponent === component && mode.streamingMessage) {
+      rememberMidTurnBlocks(mode.streamingMessage, patch);
+      if (isMidTurnAssistantMessage(mode.streamingMessage)) return true;
+    }
+  }
+  return message.content.some(block => patch.midTurnBlocks.has(block));
 }
 
 function presentationMessage(
   message: AssistantMessage,
   options: CalmTranscriptLayoutOptions,
+  midTurn: boolean,
 ): AssistantMessage {
-  const midTurn = isMidTurnAssistantMessage(message);
   const content = message.content.filter(block => {
     if (block.type === "thinking" && options.hidesThinking()) return false;
     if (
@@ -151,8 +180,15 @@ function currentAssistantComponents(
   return components;
 }
 
+// OMP's own display.hideToolActivity choice lives on each InteractiveMode, which
+// syncs it from settings and the tool-visibility keybinding, so Calm never reads it
+// through the settings API.
+function toolActivityHidden(mode: InteractiveMode, patch: CalmTranscriptPatch): boolean {
+  return patch.options.hidesTools() || mode.hideToolActivity === true;
+}
+
 function syncMode(mode: InteractiveMode, patch: CalmTranscriptPatch): void {
-  mode.chatContainer.setToolActivityVisible(!patch.options.hidesTools());
+  mode.chatContainer.setToolActivityVisible(!toolActivityHidden(mode, patch));
   for (const component of currentAssistantComponents(mode, patch)) {
     const original = patch.originalMessages.get(component);
     if (original) component.updateContent(original);
@@ -183,7 +219,7 @@ function captureMode(mode: InteractiveMode, patch: CalmTranscriptPatch): void {
     const current = (globalThis as typeof globalThis & {
       [CALM_TRANSCRIPT_PATCH]?: CalmTranscriptPatch;
     })[CALM_TRANSCRIPT_PATCH];
-    if (current) this.setToolActivityVisible(!current.options.hidesTools());
+    if (current) this.setToolActivityVisible(!toolActivityHidden(mode, current));
     return originalAddChild.call(this, component);
   };
   patch.patchedContainers.add(container);
@@ -228,7 +264,11 @@ function installPrototypeAdapters(
       ? current.originalMessages.get(this) ?? message
       : message;
     current.originalMessages.set(this, original);
-    const visible = presentationMessage(original, current.options);
+    const visible = presentationMessage(
+      original,
+      current.options,
+      belongsToMidTurnStep(this, original, current),
+    );
     if (visible !== original) current.presentationCopies.add(visible);
     return originalAssistantUpdate.call(this, visible, options);
   };
@@ -257,6 +297,7 @@ function installPrototypeAdapters(
     if (current.invalidModes.has(this)) {
       return originalAddMessage.call(this, message, options);
     }
+    rememberMidTurnBlocks(message, current);
     const before = new Set(this.chatContainer.children);
     const added = originalAddMessage.call(this, message, options);
     if (isOperationalInput(message)) {
@@ -314,12 +355,14 @@ export function installCalmTranscriptLayout(
   let patch = registry[CALM_TRANSCRIPT_PATCH];
   if (patch) {
     patch.options = options;
+    patch.midTurnBlocks ??= new WeakSet();
   } else {
     patch = {
       options,
       modes: new Set(),
       originalMessages: new WeakMap(),
       presentationCopies: new WeakSet(),
+      midTurnBlocks: new WeakSet(),
       operationalRows: new WeakSet(),
       patchedContainers: new WeakSet(),
       invalidModes: new WeakSet(),
@@ -335,7 +378,7 @@ export function installCalmTranscriptLayout(
           continue;
         }
         const hostHidesTools = mode.hideToolActivity;
-        mode.hideToolActivity = patch.options.hidesTools();
+        mode.hideToolActivity = toolActivityHidden(mode, patch);
         try {
           await mode.renderInitialMessages({ clearTerminalHistory: true });
         } finally {

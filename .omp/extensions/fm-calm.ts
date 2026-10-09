@@ -1,10 +1,10 @@
 // Firstmate's home-persistent Calm presentation for OMP (Oh My Pi).
 //
-// Verified against OMP 18.2.8. OMP is a Pi fork, but its transcript and working
-// surfaces differ enough that this extension uses OMP's own exported TUI classes and
-// lifecycle. Each internal presentation adapter probes the exact method it patches and
-// degrades independently with a diagnostic. docs/calm.md owns the user-facing contract,
-// and docs/configuration.md owns the shared config/calm preference.
+// Verified against OMP 18.2.8 and 18.7.0. OMP is a Pi fork, but its transcript and
+// working surfaces differ enough that this extension uses OMP's own exported TUI
+// classes and lifecycle. Each internal presentation adapter probes the exact method it
+// patches and degrades independently with a diagnostic. docs/calm.md owns the
+// user-facing contract, and docs/configuration.md owns the shared config/calm preference.
 import { randomUUID } from "node:crypto";
 import {
   mkdirSync,
@@ -73,7 +73,6 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  const settings = pi.pi.settings;
   const transcriptClasses: OmpCalmTranscriptClasses = {
     InteractiveMode: pi.pi.InteractiveMode,
     AssistantMessageComponent: pi.pi.AssistantMessageComponent,
@@ -88,7 +87,7 @@ export default function (pi: ExtensionAPI) {
       installCalmTranscriptLayout(transcriptClasses, {
         hidesThinking: () => calm,
         hidesWorkingNote: () => calm,
-        hidesTools: () => calm || settings.get("display.hideToolActivity") === true,
+        hidesTools: () => calm,
         hidesOperationalInput: () => calm,
       }),
   );
