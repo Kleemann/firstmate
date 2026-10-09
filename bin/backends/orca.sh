@@ -50,9 +50,9 @@ process.exit(1);
 
 fm_backend_orca_json_get() {  # <field> ; fields: worktree-id worktree-path terminal-handle worktree-terminal-handle repo-id
   # Terminal handles are accepted only from verified terminal result shapes:
-  # result.terminal or a root terminal object with .handle. Undocumented
-  # result.id and result.worktree.terminal shapes are ignored until a real Orca
-  # smoke run proves them.
+  # result.terminal, result.agentTerminalHandle, result.startupTerminal, or a
+  # root terminal object with .handle. Undocumented result.id and
+  # result.worktree.terminal shapes remain ignored.
   local field=$1
   node -e '
 const fs = require("fs");
@@ -79,7 +79,9 @@ let v = "";
 if (field === "worktree-id") v = wt.id || wt.worktreeId || r.worktreeId || "";
 if (field === "worktree-path") v = wt.path || (wt.git && wt.git.path) || r.path || "";
 if (field === "terminal-handle") v = handle(explicitTerm || r) || "";
-if (field === "worktree-terminal-handle") v = handle(explicitTerm) || "";
+if (field === "worktree-terminal-handle") {
+  v = scalar(r.agentTerminalHandle) || handle(r.startupTerminal) || handle(explicitTerm) || "";
+}
 if (field === "repo-id") v = repo.id || repo.repoId || r.repoId || "";
 if (!v) process.exit(1);
 process.stdout.write(String(v));
@@ -154,6 +156,45 @@ fm_backend_orca_worktree_create() {  # <project-path> <name>
   [ -z "$terminal" ] || printf '\t%s' "$terminal"
 }
 
+fm_backend_orca_json_fallback_shell_handle() {  # <worktree-id> <task-terminal-handle>
+  local worktree_id=$1 task_terminal=$2
+  node -e '
+const fs = require("fs");
+const worktreeId = process.argv[1];
+const taskTerminal = process.argv[2];
+const data = JSON.parse(fs.readFileSync(0, "utf8"));
+if (data.ok === false) process.exit(2);
+const terminals = (data.result && data.result.terminals) || [];
+if (terminals.length !== 2) process.exit(1);
+const task = terminals.find((terminal) => terminal && terminal.handle === taskTerminal);
+if (!task || task.worktreeId !== worktreeId) process.exit(1);
+function looksLikeUnusedShell(terminal) {
+  if (!terminal || terminal.handle === taskTerminal) return false;
+  if (terminal.worktreeId !== worktreeId || terminal.title !== "Terminal 1") return false;
+  if (terminal.connected !== true || terminal.writable !== true || terminal.orphaned === true) return false;
+  if (terminal.agentWait != null || terminal.agentIdentity != null) return false;
+  const preview = typeof terminal.preview === "string" ? terminal.preview.trimEnd() : "";
+  if (terminal.lastOutputAt == null && preview === "") return true;
+  const lines = preview.split(/\r?\n/).filter((line) => line.length > 0);
+  if (lines.length < 1 || lines.length > 3) return false;
+  return /(?:❯|[$%#>])\s*$/.test(lines[lines.length - 1]);
+}
+const candidates = terminals.filter(looksLikeUnusedShell);
+if (candidates.length !== 1) process.exit(1);
+process.stdout.write(candidates[0].handle);
+' "$worktree_id" "$task_terminal"
+}
+
+fm_backend_orca_close_redundant_fallback_shell() {  # <worktree-id> <task-terminal-handle>
+  local worktree_id=$1 task_terminal=$2 out fallback
+  out=$(orca terminal list --worktree "id:$worktree_id" --json 2>/dev/null) || return 0
+  fallback=$(printf '%s' "$out" | fm_backend_orca_json_fallback_shell_handle "$worktree_id" "$task_terminal" 2>/dev/null || true)
+  [ -n "$fallback" ] || return 0
+  if ! fm_backend_orca_run_json orca terminal close --terminal "$fallback" --json; then
+    echo "warning: Orca left a redundant fallback shell '$fallback' beside task terminal '$task_terminal'" >&2
+  fi
+}
+
 fm_backend_orca_terminal_create() {  # <worktree-id> <title>
   local worktree_id=$1 title=$2 out terminal
   fm_backend_orca_tool_check || return 1
@@ -162,6 +203,7 @@ fm_backend_orca_terminal_create() {  # <worktree-id> <title>
     echo "error: orca terminal create did not return a terminal handle for $title" >&2
     return 1
   }
+  fm_backend_orca_close_redundant_fallback_shell "$worktree_id" "$terminal"
   printf '%s' "$terminal"
 }
 

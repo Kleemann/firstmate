@@ -46,7 +46,9 @@ Orca returns `orca_worktree_id=` as that composite of the Orca repo id and the w
 
 ## Current lifecycle and safety
 
-Spawn registers the repository, creates an independent worktree, reuses only the verified `result.terminal.handle` returned by Orca or creates a terminal explicitly, installs harness hooks, records metadata, and launches the selected harness.
+Spawn registers the repository, creates an independent worktree, reuses a verified terminal handle returned by Orca or creates a terminal explicitly, installs harness hooks, records metadata, and launches the selected harness.
+When bare worktree creation adds one unused fallback shell but returns no handle for it, the explicit-terminal path inventories the worktree and closes only that exact fallback shape after the task terminal exists.
+Configured terminal layouts and setup processes do not match that narrow shape and remain intact beside the task terminal.
 Exact command flags and response parsing are owned by `bin/backends/orca.sh` and script help.
 
 `fm-peek.sh` reads with `orca terminal read`.
@@ -74,7 +76,7 @@ Reinstall the CLI and rerun; [`verification/runtime-backends.md`](verification/r
 - Secondmate spawns are unsupported.
 - Escape is unsupported.
 - Orca exposes no stable CLI version or protocol marker, so readiness is the compatibility gate rather than a version floor.
-- Only the verified terminal-handle and worktree result fields are accepted; speculative response shapes are rejected.
+- Terminal handles are accepted only from the live-verified `result.terminal.handle`, `result.agentTerminalHandle`, and `result.startupTerminal.handle` shapes; speculative bare ids and nested worktree terminal fields are rejected.
 - Orca's worktree shape is unverified against the spawn-time Claude workspace-trust check in `bin/fm-claude-trust.sh`, which refuses any path that is not a linked git worktree sharing the project's git common dir, so a claude spawn on Orca fails loudly at that check rather than launching if Orca clones instead of linking.
 
 ## Regression entry points

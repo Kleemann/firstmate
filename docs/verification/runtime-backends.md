@@ -1886,30 +1886,36 @@ The real lifecycle smoke proved spawn, metadata, nested-subshell worktree discov
 
 ## Orca
 
-Real readiness was verified against `/usr/local/bin/orca` with `/Applications/Orca.app` bundle version 1.4.116.
+Real readiness and launch topology were verified on 2026-10-09 against `/Applications/Orca.app/Contents/Resources/bin/orca` with bundle version 1.4.223.
 
 ```sh
 orca status --json
+orca worktree create --repo "id:<fixture-repo-id>" --name <fixture-name> --no-parent --setup skip --json
+orca terminal list --worktree "id:<worktree-id>" --include-visual-layouts --json
+orca terminal create --worktree "id:<worktree-id>" --title <task-name> --command '<custom-command>' --json
+orca worktree create --repo "id:<fixture-repo-id>" --name <fixture-name> --no-parent --setup skip --agent pi --json
 ```
 
-Observed fields:
+Observed fields and topology:
 
 ```text
 result.runtime.reachable=true
 result.runtime.state=ready
+bare create: result.worktree.id + result.worktree.path, no terminal handle; terminal list totalCount=1 (Terminal 1 fallback)
+custom-command create before pruning: terminal list totalCount=2 (fallback + custom terminal)
+changed backend counterfactual: terminal list totalCount=1 and the retained terminal printed FM_FIXED_CUSTOM_READY
+agent-first create: result.agentTerminalHandle=result.startupTerminal.handle; terminal list totalCount=1
 ```
 
-`orca terminal create --json` returned `result.terminal.handle`.
-`orca worktree create` returned `result.worktree.id` and `result.worktree.path`.
-Speculative bare ids and nested terminal fields were deliberately rejected.
+The native fixture was a task-owned local clone and every created Orca worktree was removed through `orca worktree rm` after capture.
+Speculative bare ids and nested worktree terminal fields remain deliberately rejected.
 
 ```sh
-tests/fm-backend-orca.test.sh
-tests/fm-backend.test.sh
-tests/fm-bootstrap.test.sh
+bin/fm-test-run.sh tests/fm-backend-orca.test.sh
+bin/fm-test-run.sh tests/fm-backend.test.sh tests/fm-bootstrap.test.sh
 ```
 
-The fake-Orca suite covers readiness, registration, create response parsing, metadata routing, popup-safe submit, and path-matched release refusal.
+The fake-Orca suite covers readiness, registration, live-verified create response parsing, fallback-shell removal, preservation of configured terminal layouts and setup processes, metadata routing, popup-safe submit, and path-matched release refusal.
 
 ## cmux
 

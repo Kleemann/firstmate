@@ -446,6 +446,57 @@ test_json_get_ignores_undocumented_terminal_id_shapes() {
   pass "fm_backend_orca_json_get: ignores undocumented terminal id shapes"
 }
 
+test_json_get_accepts_verified_agent_first_terminal_shapes() {
+  local out
+  out=$( printf '{"ok":true,"result":{"agentTerminalHandle":"term-agent","startupTerminal":{"handle":"term-startup"}}}\n' | \
+    bash -c '. "$0/bin/backends/orca.sh"; fm_backend_orca_json_get worktree-terminal-handle' "$ROOT" )
+  [ "$out" = term-agent ] || fail "agent-first parsing should prefer result.agentTerminalHandle, got '$out'"
+  out=$( printf '{"ok":true,"result":{"startupTerminal":{"handle":"term-startup"}}}\n' | \
+    bash -c '. "$0/bin/backends/orca.sh"; fm_backend_orca_json_get worktree-terminal-handle' "$ROOT" )
+  [ "$out" = term-startup ] || fail "agent-first parsing should accept result.startupTerminal.handle, got '$out'"
+  pass "fm_backend_orca_json_get: accepts the live-verified agent-first terminal result shapes"
+}
+
+test_terminal_create_closes_only_the_redundant_fallback_shell() {
+  local out
+  orca_case terminal-create-prunes-fallback
+  printf '{"ok":true,"result":{"terminal":{"handle":"term-task"}}}\n' > "$RESP/1.out"
+  printf '%s\n' '{"ok":true,"result":{"terminals":[{"handle":"term-fallback","worktreeId":"wt-123::/orca/wt-123","title":"Terminal 1","connected":true,"writable":true,"orphaned":false,"lastOutputAt":123,"preview":"task on branch\n❯"},{"handle":"term-task","worktreeId":"wt-123::/orca/wt-123","title":"fm-task","connected":true,"writable":true,"orphaned":false,"lastOutputAt":null,"preview":""}]}}' > "$RESP/2.out"
+  printf '{"ok":true,"result":{"closed":true}}\n' > "$RESP/3.out"
+  out=$( PATH="$FB:$PATH" FM_ORCA_LOG="$LOG" FM_ORCA_RESPONSES="$RESP" \
+    bash -c '. "$0/bin/backends/orca.sh"; fm_backend_orca_terminal_create wt-123::/orca/wt-123 fm-task' "$ROOT" )
+  [ "$out" = term-task ] || fail "terminal helper should return the task terminal after pruning, got '$out'"
+  assert_contains "$(cat "$LOG")" $'orca\x1f''terminal'$'\x1f''list'$'\x1f''--worktree'$'\x1f''id:wt-123::/orca/wt-123'$'\x1f''--json' \
+    "terminal helper did not inspect the post-create terminal inventory"
+  assert_contains "$(cat "$LOG")" $'orca\x1f''terminal'$'\x1f''close'$'\x1f''--terminal'$'\x1f''term-fallback'$'\x1f''--json' \
+    "terminal helper did not close the verified fallback shell"
+  assert_not_contains "$(cat "$LOG")" $'orca\x1f''terminal'$'\x1f''close'$'\x1f''--terminal'$'\x1f''term-task' \
+    "terminal helper closed the task terminal instead of the fallback"
+  pass "fm_backend_orca_terminal_create: closes one verified unused fallback shell"
+}
+
+test_terminal_create_preserves_configured_terminals() {
+  local out
+  orca_case terminal-create-preserves-configured
+  printf '{"ok":true,"result":{"terminal":{"handle":"term-task"}}}\n' > "$RESP/1.out"
+  printf '%s\n' '{"ok":true,"result":{"terminals":[{"handle":"term-configured","worktreeId":"wt-123::/orca/wt-123","title":"Terminal 1","connected":true,"writable":true,"orphaned":false,"lastOutputAt":null,"preview":"","agentIdentity":"pi"},{"handle":"term-task","worktreeId":"wt-123::/orca/wt-123","title":"fm-task","connected":true,"writable":true,"orphaned":false,"lastOutputAt":null,"preview":""}]}}' > "$RESP/2.out"
+  out=$( PATH="$FB:$PATH" FM_ORCA_LOG="$LOG" FM_ORCA_RESPONSES="$RESP" \
+    bash -c '. "$0/bin/backends/orca.sh"; fm_backend_orca_terminal_create wt-123::/orca/wt-123 fm-task' "$ROOT" )
+  [ "$out" = term-task ] || fail "terminal helper should return the task terminal beside a configured tab, got '$out'"
+  assert_not_contains "$(cat "$LOG")" $'orca\x1f''terminal'$'\x1f''close' \
+    "terminal helper closed a deliberate configured agent terminal"
+
+  orca_case terminal-create-preserves-multiple
+  printf '{"ok":true,"result":{"terminal":{"handle":"term-task"}}}\n' > "$RESP/1.out"
+  printf '%s\n' '{"ok":true,"result":{"terminals":[{"handle":"term-configured-shell","worktreeId":"wt-123::/orca/wt-123","title":"Terminal 1","connected":true,"writable":true,"orphaned":false,"lastOutputAt":null,"preview":""},{"handle":"term-configured-setup","worktreeId":"wt-123::/orca/wt-123","title":"setup","connected":true,"writable":true,"orphaned":false,"lastOutputAt":789,"preview":"installing"},{"handle":"term-task","worktreeId":"wt-123::/orca/wt-123","title":"fm-task","connected":true,"writable":true,"orphaned":false,"lastOutputAt":null,"preview":""}]}}' > "$RESP/2.out"
+  out=$( PATH="$FB:$PATH" FM_ORCA_LOG="$LOG" FM_ORCA_RESPONSES="$RESP" \
+    bash -c '. "$0/bin/backends/orca.sh"; fm_backend_orca_terminal_create wt-123::/orca/wt-123 fm-task' "$ROOT" )
+  [ "$out" = term-task ] || fail "terminal helper should return the task terminal beside configured tabs, got '$out'"
+  assert_not_contains "$(cat "$LOG")" $'orca\x1f''terminal'$'\x1f''close' \
+    "terminal helper closed one member of a deliberate configured-terminal layout"
+  pass "fm_backend_orca_terminal_create: preserves configured terminals and setup processes"
+}
+
 test_worktree_and_terminal_helpers_parse_json() {
   local out wt_id wt_path term
   orca_case lifecycle-helpers
@@ -527,7 +578,7 @@ test_spawn_preserves_orca_metadata_when_pathless_worktree_cleanup_fails() {
   pass "fm-spawn.sh --backend orca: preserves metadata when pathless cleanup fails"
 }
 
-test_spawn_writes_orca_metadata_and_launches_harness() {
+test_spawn_writes_orca_metadata_and_launches_harness_without_fallback_shell() {
   local proj wt data state config id out log staged launch
   id="orcaspawnz1"
   proj="$TMP_ROOT/spawn-project"
@@ -543,7 +594,10 @@ test_spawn_writes_orca_metadata_and_launches_harness() {
   log="$LOG"
   printf '1\n' > "$RESP/1.exit"
   printf '{"ok":true,"result":{"repo":{"id":"repo-spawn"}}}\n' > "$RESP/2.out"
-  printf '{"ok":true,"result":{"worktree":{"id":"wt-spawn::/orca/wt-spawn","path":"%s"},"terminal":{"handle":"term-spawn"}}}\n' "$wt" > "$RESP/3.out"
+  printf '{"ok":true,"result":{"worktree":{"id":"wt-spawn::/orca/wt-spawn","path":"%s"}}}\n' "$wt" > "$RESP/3.out"
+  printf '{"ok":true,"result":{"terminal":{"handle":"term-spawn"}}}\n' > "$RESP/4.out"
+  printf '%s\n' '{"ok":true,"result":{"terminals":[{"handle":"term-fallback","worktreeId":"wt-spawn::/orca/wt-spawn","title":"Terminal 1","connected":true,"writable":true,"orphaned":false,"lastOutputAt":null,"preview":""},{"handle":"term-spawn","worktreeId":"wt-spawn::/orca/wt-spawn","title":"fm-orcaspawnz1","connected":true,"writable":true,"orphaned":false,"lastOutputAt":null,"preview":""}]}}' > "$RESP/5.out"
+  printf '{"ok":true,"result":{"closed":true}}\n' > "$RESP/6.out"
   out=$( HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' PATH="$FB:$PATH" FM_ORCA_LOG="$LOG" FM_ORCA_RESPONSES="$RESP" \
     FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
     FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" FM_SPAWN_NO_GUARD=1 \
@@ -556,8 +610,10 @@ test_spawn_writes_orca_metadata_and_launches_harness() {
   assert_grep "terminal=term-spawn" "$state/$id.meta" "meta missing terminal handle"
   assert_grep "orca_worktree_id=wt-spawn::/orca/wt-spawn" "$state/$id.meta" "meta missing Orca worktree id"
   assert_grep "worktree=$wt" "$state/$id.meta" "meta missing Orca worktree path"
-  assert_not_contains "$(cat "$log")" $'orca\x1f''terminal'$'\x1f''create' \
-    "spawn should reuse the implicit terminal returned by Orca worktree creation"
+  assert_contains "$(cat "$log")" $'orca\x1f''terminal'$'\x1f''create'$'\x1f''--worktree'$'\x1f''id:wt-spawn::/orca/wt-spawn'$'\x1f''--title'$'\x1f'"fm-$id"$'\x1f''--json' \
+    "spawn did not create the task terminal when bare worktree creation omitted its handle"
+  assert_contains "$(cat "$log")" $'orca\x1f''terminal'$'\x1f''close'$'\x1f''--terminal'$'\x1f''term-fallback'$'\x1f''--json' \
+    "spawn left Orca's redundant empty fallback shell beside the task terminal"
   assert_contains "$(cat "$log")" $'orca\x1f''terminal'$'\x1f''send'$'\x1f''--terminal'$'\x1f''term-spawn'$'\x1f''--text'$'\x1f''export GOTMPDIR=/tmp/fm-orcaspawnz1/gotmp'$'\x1f''--enter'$'\x1f''--json' \
     "spawn did not export GOTMPDIR through the Orca terminal"
   staged=$(tr '\037' '\n' < "$log" | sed -n "s/^\. '\([^']*\)'$/\1/p" | tail -1)
@@ -568,7 +624,7 @@ test_spawn_writes_orca_metadata_and_launches_harness() {
   assert_contains "$launch" "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false CLAUDE_CODE_SEND_FEEDBACK=0 claude --dangerously-skip-permissions $add_dirs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}'" \
     "the staged launch sent through Orca did not select the Claude harness"
   rm -rf "/tmp/fm-$id" "$(dirname "$staged")"
-  pass "fm-spawn.sh --backend orca: reuses implicit terminal, records metadata, launches harness"
+  pass "fm-spawn.sh --backend orca: removes the fallback shell, records metadata, launches the exact custom harness command"
 }
 
 test_spawn_refuses_orca_secondmate_before_home_mutation() {
@@ -1374,10 +1430,13 @@ test_remove_worktree_rejects_orca_error_json
 test_worktree_path_resolves_id
 test_dispatcher_sources_orca_and_routes_primitives
 test_json_get_ignores_undocumented_terminal_id_shapes
+test_json_get_accepts_verified_agent_first_terminal_shapes
+test_terminal_create_closes_only_the_redundant_fallback_shell
+test_terminal_create_preserves_configured_terminals
 test_worktree_and_terminal_helpers_parse_json
 test_worktree_create_removes_worktree_when_path_missing
 test_spawn_preserves_orca_metadata_when_pathless_worktree_cleanup_fails
-test_spawn_writes_orca_metadata_and_launches_harness
+test_spawn_writes_orca_metadata_and_launches_harness_without_fallback_shell
 test_spawn_refuses_orca_secondmate_before_home_mutation
 test_spawn_refuses_orca_when_runtime_not_ready
 test_spawn_refuses_orca_nonisolated_worktree
