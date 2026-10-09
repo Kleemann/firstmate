@@ -134,7 +134,7 @@ class InteractiveMode {
 const handlers = new Map();
 const commands = new Map();
 const extension = await import(`${pathToFileURL(process.env.EXT).href}?test=${Date.now()}`);
-// OMP 18.7.0's injected settings object has no generic get(); Calm must not need one.
+// The settings object injected by OMP 18.7.0 has no generic get(); Calm must not need one.
 extension.default({
   pi: {
     settings: {},
@@ -261,13 +261,13 @@ mode.hideToolActivity = true;
 await mode.addMessageToChat(finalAnswer);
 assert(
   mode.chatContainer.toolActivityVisible === false,
-  "Calm off overrode OMP's own hidden tool-activity choice",
+  "Calm off overrode the hidden tool-activity choice of OMP",
 );
 mode.hideToolActivity = false;
 await commands.get("calm").handler("", context);
 assert(readFileSync(`${process.env.FM_HOME}/config/calm`, "utf8") === "on\n", "/calm did not persist on");
 assert(mode.chatContainer.toolActivityVisible === false, "/calm on did not hide tool activity again");
-assert(mode.hideToolActivity === false, "/calm changed OMP's own tool-activity choice");
+assert(mode.hideToolActivity === false, "/calm changed the tool-activity choice of OMP");
 await commands.get("calm").handler("", context);
 assert(mode.chatContainer.toolActivityVisible === true, "second /calm off did not restore tool activity");
 
@@ -313,7 +313,7 @@ await commands.get("calm").handler("", context);
 assert(streamed.message.content[0]?.text === "On it", "/calm off did not restore a live segment note");
 assert(
   segmentedMidTurn.message.content.length === 2,
-  "/calm off did not restore a rebuilt segment's thinking and note",
+  "/calm off did not restore the thinking and note of a rebuilt segment",
 );
 await commands.get("calm").handler("", context);
 assert(streamed.message.content.length === 0, "/calm on did not re-hide a settled live segment note");
